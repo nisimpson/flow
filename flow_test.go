@@ -27,7 +27,7 @@ func TestFromClock(t *testing.T) {
 	defer cancel()
 
 	// blocks until timeout
-	err := flow.NewFromTicker(time.Millisecond).To(ctx, flow.Discard())
+	err := flow.NewFromTicker(time.Millisecond).Collect(ctx, flow.Discard())
 	require.ErrorContains(t, err, "context deadline exceeded")
 }
 
@@ -62,8 +62,8 @@ func TestMerge(t *testing.T) {
 func TestFlowClone(t *testing.T) {
 	src1 := flow.NewFromItems(1, 2, 3)
 	src2 := src1.Clone()
-	src1 = src1.Thru(flow.Map(double))
-	src2 = src2.Thru(flow.Map(triple))
+	src1 = src1.Transform(flow.Map(double))
+	src2 = src2.Transform(flow.Map(triple))
 
 	ctx := context.TODO()
 	got1, err1 := flow.Collect[any](ctx, src1)
@@ -80,7 +80,7 @@ func TestPipes(t *testing.T) {
 	type testcase struct {
 		name    string
 		in      flow.Flow
-		pipes   []flow.Pipe
+		pipes   []flow.Transform
 		want    []any
 		wantErr bool
 	}
@@ -89,84 +89,84 @@ func TestPipes(t *testing.T) {
 		{
 			name:    "passthrough",
 			in:      flow.NewFromItems(1, 2, 3),
-			pipes:   []flow.Pipe{flow.Passthrough()},
+			pipes:   []flow.Transform{flow.Passthrough()},
 			want:    []any{1, 2, 3},
 			wantErr: false,
 		},
 		{
 			name:    "error",
 			in:      flow.NewFromItems(1, 2, 3),
-			pipes:   []flow.Pipe{flow.Map(throwsErr)},
+			pipes:   []flow.Transform{flow.Map(throwsErr)},
 			want:    nil,
 			wantErr: true,
 		},
 		{
 			name:    "map double and stringify",
 			in:      flow.NewFromItems(1, 2, 3),
-			pipes:   []flow.Pipe{flow.Map(double), flow.Map(stringify)},
+			pipes:   []flow.Transform{flow.Map(double), flow.Map(stringify)},
 			want:    []any{"2", "4", "6"},
 			wantErr: false,
 		},
 		{
 			name:    "map double, take 2, and stringify",
 			in:      flow.NewFromItems(1, 2, 3),
-			pipes:   []flow.Pipe{flow.Map(double), flow.Take(2), flow.Map(stringify)},
+			pipes:   []flow.Transform{flow.Map(double), flow.Keep(2), flow.Map(stringify)},
 			want:    []any{"2", "4"},
 			wantErr: false,
 		},
 		{
 			name:    "map double, drop 2, and stringify",
 			in:      flow.NewFromItems(1, 2, 3, 4),
-			pipes:   []flow.Pipe{flow.Map(double), flow.Drop(2), flow.Map(stringify)},
+			pipes:   []flow.Transform{flow.Map(double), flow.Skip(2), flow.Map(stringify)},
 			want:    []any{"6", "8"},
 			wantErr: false,
 		},
 		{
 			name:    "reduce and stringify",
 			in:      flow.NewFromItems(1, 2, 3),
-			pipes:   []flow.Pipe{flow.Reduce(increment), flow.Map(stringify)},
+			pipes:   []flow.Transform{flow.Reduce(increment), flow.Map(stringify)},
 			want:    []any{"1", "3", "6"},
 			wantErr: false,
 		},
 		{
 			name:    "unique",
 			in:      flow.NewFromItems(1, 2, 2, 3),
-			pipes:   []flow.Pipe{flow.Unique[int]()},
+			pipes:   []flow.Transform{flow.Unique[int]()},
 			want:    []any{1, 2, 3},
 			wantErr: false,
 		},
 		{
 			name:    "limit every 10 milliseconds",
 			in:      flow.NewFromItems(1, 2, 3),
-			pipes:   []flow.Pipe{flow.Limit(rate.Every(10*time.Millisecond), 1)},
+			pipes:   []flow.Transform{flow.Limit(rate.Every(10*time.Millisecond), 1)},
 			want:    []any{1, 2, 3},
 			wantErr: false,
 		},
 		{
 			name:    "flat map",
 			in:      flow.NewFromItems(2, 4, 6),
-			pipes:   []flow.Pipe{flow.FlatMap(halves)},
+			pipes:   []flow.Transform{flow.FlatMap(halves)},
 			want:    []any{1, 1, 2, 2, 3, 3},
 			wantErr: false,
 		},
 		{
 			name:    "flatten",
 			in:      flow.NewFromItems([]int{1, 2, 3}, []int{4, 5, 6}),
-			pipes:   []flow.Pipe{flow.Flatten[[]int]()},
+			pipes:   []flow.Transform{flow.Flatten[[]int]()},
 			want:    []any{1, 2, 3, 4, 5, 6},
 			wantErr: false,
 		},
 		{
 			name:    "filter",
 			in:      flow.NewFromItems(1, 2, 3, 4),
-			pipes:   []flow.Pipe{flow.Filter(keepOdds)},
+			pipes:   []flow.Transform{flow.Filter(keepOdds)},
 			want:    []any{1, 3},
 			wantErr: false,
 		},
 		{
 			name:  "chunk",
 			in:    flow.NewFromItems(1, 2, 3, 4, 5),
-			pipes: []flow.Pipe{flow.Chunk[int](2)},
+			pipes: []flow.Transform{flow.Chunk[int](2)},
 			want: []any{
 				[]int{1, 2},
 				[]int{3, 4},
@@ -177,7 +177,7 @@ func TestPipes(t *testing.T) {
 		{
 			name: "sliding window",
 			in:   flow.NewFromItems(1, 2, 3, 4),
-			pipes: []flow.Pipe{flow.SlidingWindow[int](func(swo *flow.SlidingWindowOptions) {
+			pipes: []flow.Transform{flow.SlidingWindow[int](func(swo *flow.SlidingWindowOptions) {
 				swo.WindowSize = 2
 				swo.StepSize = 1
 			})},
@@ -191,7 +191,7 @@ func TestPipes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var (
-				src      = tc.in.Thru(tc.pipes...)
+				src      = tc.in.Transform(tc.pipes...)
 				got, err = flow.Collect[any](context.TODO(), src)
 			)
 			if tc.wantErr {
@@ -206,12 +206,12 @@ func TestPipes(t *testing.T) {
 
 func TestSinks(t *testing.T) {
 	t.Run("discard", func(t *testing.T) {
-		err := flow.NewFromItems(1, 2, 3).To(context.TODO(), flow.Discard())
+		err := flow.NewFromItems(1, 2, 3).Collect(context.TODO(), flow.Discard())
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		err = flow.NewFromItems(1, 2, 3).To(ctx, flow.Discard())
+		err = flow.NewFromItems(1, 2, 3).Collect(ctx, flow.Discard())
 		require.Error(t, err)
 	})
 
@@ -224,7 +224,7 @@ func TestSinks(t *testing.T) {
 		}()
 
 		// blocks until ch is consumed
-		err := flow.NewFromItems(1, 2, 3).To(context.TODO(), sink)
+		err := flow.NewFromItems(1, 2, 3).Collect(context.TODO(), sink)
 		require.NoError(t, err)
 	})
 
@@ -232,10 +232,10 @@ func TestSinks(t *testing.T) {
 		sink := flow.FanOutSink[int]{
 			Flows: map[string]func(flow.Source) flow.Flow{
 				"odd": func(s flow.Source) flow.Flow {
-					return flow.NewFromSource(s).Thru(flow.Map(double))
+					return flow.NewFromSource(s).Transform(flow.Map(double))
 				},
 				"even": func(s flow.Source) flow.Flow {
-					return flow.NewFromSource(s).Thru(flow.Map(triple))
+					return flow.NewFromSource(s).Transform(flow.Map(triple))
 				},
 			},
 			Key: func(ctx context.Context, i int) string {
@@ -245,7 +245,7 @@ func TestSinks(t *testing.T) {
 				return "odd"
 			},
 		}
-		err := flow.NewFromItems(1, 2, 3, 4).To(context.TODO(), &sink)
+		err := flow.NewFromItems(1, 2, 3, 4).Collect(context.TODO(), &sink)
 		require.NoError(t, err)
 		require.Len(t, sink.Sources(), 2)
 	})

@@ -12,14 +12,14 @@ type Sinker interface {
 	In(ctx context.Context, stream Stream)
 }
 
-// To executes the [Flow] by sending its output to the provided [Sinker]. It handles error
+// Collect executes the [Flow] by sending its output to the provided [Sinker]. It handles error
 // propagation and context cancellation while processing the stream.
 //
 // The method will stop processing when either:
 //   - The flow completes successfully
 //   - The context is cancelled
 //   - An error occurs during processing
-func (fn Flow) To(ctx context.Context, sink Sinker) error {
+func (fn Flow) Collect(ctx context.Context, sink Sinker) error {
 	var (
 		src     = fn()
 		fe      = FlowError{}
@@ -55,7 +55,7 @@ func NewSliceSink[T any](s []T) *SliceSink[T] { return &SliceSink[T]{arr: s} }
 func Collect[T any](ctx context.Context, src Source) ([]T, error) {
 	var (
 		sink = NewSliceSink(make([]T, 0))
-		err  = NewFromSource(src).To(ctx, sink)
+		err  = NewFromSource(src).Collect(ctx, sink)
 	)
 	return sink.Items(), err
 }
@@ -104,6 +104,9 @@ type ChannelSink[T any] chan<- T
 // NewChannelSink creates a new [ChannelSink] from the provided channel.
 func NewChannelSink[T any](ch chan<- T) ChannelSink[T] { return ChannelSink[T](ch) }
 
+// In implements the [Sinker] interface, sending items from the [Stream] to the
+// underlying channel until there are no more items present or the provided
+// context is cancelled.
 func (c ChannelSink[T]) In(ctx context.Context, in Stream) {
 	defer close(c)
 	for item := range in {

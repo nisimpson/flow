@@ -4,21 +4,35 @@
 [![GoDoc](https://godoc.org/github.com/nisimpson/flow?status.svg)](http://godoc.org/github.com/nisimpson/flow)
 [![Release](https://img.shields.io/github/release/nisimpson/flow.svg)](https://github.com/nisimpson/flow/releases)
 
-Flow is a Go library that enables the creation of composable data pipelines using Go channels.
-It provides a set of primitives for building concurrent data processing pipelines with operations
-like map, filter, reduce, fan-out, and fan-in.
+Flow is a Go library that provides primitives for building flow-based processing pipelines. It implements a pull-based streaming model that enables efficient data processing through composable components. The library allows you to create, transform, and consume data streams with built-in support for error handling, context cancellation, and type safety using Go generics.
 
 ## Key Features
 
-- Type-safe pipeline operations using Go generics
-- Concurrent processing with Go channels
-- Composable pipeline components
-- Built-in support for common operations:
-  - Map: Transform data
-  - Filter: Include/exclude data
+- **Pull-based streaming model** for efficient data processing
+- **Context-aware processing** with cancellation support
+- **Built-in error handling and propagation**
+- **Type-safe data processing** using Go generics
+- **Composable pipeline components**
+- **Support for both synchronous and asynchronous processing**
+- **Rich set of source constructors**:
+  - Create flows from slices, channels, iterables, time-based events, and numeric ranges
+  - Merge multiple sources into a single flow
+  - Clone streams for parallel processing
+- **Comprehensive transformation operations**:
+  - Map: Transform data items
+  - Filter/KeepIf/SkipIf: Include/exclude data based on predicates
   - Reduce: Aggregate data
-  - Fan-out: Split data streams
-  - Fan-in: Combine data streams
+  - FlatMap/Flatten: Expand data streams
+  - Chunk: Group items into fixed-size chunks
+  - SlidingWindow: Create overlapping windows of data
+  - Unique: Remove duplicates
+  - Limit: Apply rate limiting
+  - Keep/Skip/First/Last: Control which items are processed
+- **Flexible data sinks**:
+  - Collect results into slices
+  - Send data to channels
+  - Fan-out to distribute items to multiple flows
+  - Discard items when only side effects matter
 
 ## Installation
 
@@ -28,99 +42,270 @@ go get github.com/nisimpson/flow
 
 ## Examples
 
-### Basic Pipeline with Map Operation
+### Basic Flow Creation
 
 ```go
+package main
+
 import (
-    "github.com/nisimpson/flow/pipeline"
+    "context"
+    "fmt"
+    
+    "github.com/nisimpson/flow"
 )
 
-// Create a pipeline that doubles numbers
-source := pipeline.FromSlice(1, 2, 3, 4)
-double := func(in int) int { return in * 2 }
-result := source.Thru(pipeline.Map(double))
-
-// Consume the results
-for num := range result.Out() {
-    fmt.Println(num) // Prints: 2, 4, 6, 8
-}
-```
-
-### Filtering Data
-
-```go
-// Create a pipeline that keeps only even numbers
-source := pipeline.FromSlice(1, 2, 3, 4, 5, 6)
-isEven := func(n int) bool { return n % 2 == 0 }
-result := source.Thru(pipeline.Filter(isEven))
-
-// Or using the more expressive KeepIf
-result := source.Thru(pipeline.KeepIf(isEven))
-```
-
-### Complex Pipeline with Multiple Operations
-
-```go
-source := pipeline.
-    FromSlice(1, 2, 3, 4, 5).
-    Thru(
-        pipeline.Map(func(n int) int { return n * 2 }),
-        pipeline.Filter(func(n int) bool { return n > 5 }),
-        pipeline.Map(func(n int) string { return fmt.Sprintf("Value: %d", n) }),
-    )
-```
-
-### Fan-Out Example
-
-```go
-source := pipeline.FromSlice(1, 2, 3, 4)
-keyFn := func(n int) string {
-    if n % 2 == 0 {
-        return "even"
+func main() {
+    // Create a flow from a slice of integers
+    f := flow.NewFromItems(1, 2, 3, 4, 5)
+    
+    // Create a context
+    ctx := context.Background()
+    
+    // Consume the flow and print each item
+    for item := range f.Out(ctx) {
+        fmt.Println(item)
     }
-    return "odd"
 }
-
-generators := map[string]pipeline.DemuxPipelineFunction{
-    "even": func(s flow.Source) pipeline.Flow {
-        // process even numbers separately
-        return pipeline.From(s)
-    },
-    "odd":  func(s flow.Source) pipeline.Flow {
-        // process odd numbers separately
-        return pipeline.From(s)
-    },
-}
-
-fanout := pipeline.Demux(keyFn, generators)
-source.To(fanout)
-
-// return sources for further processing, such as fan-in
-source = pipeline.Mux(fanout.Sources()...)
 ```
 
-### Fan-In Example
+### Transforming Data with Map, Filter, and Reduce
 
 ```go
-// Create two sources
-source1 := pipeline.FromSlice(1, 2, 3)
-source2 := pipeline.FromSlice(4, 5, 6)
+package main
 
-// Combine the sources into a single pipeline
-combined := pipeline.Mux(source1, source2)
+import (
+    "context"
+    "fmt"
+    "strconv"
+    
+    "github.com/nisimpson/flow"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // Create a flow and apply transformations
+    f := flow.NewFromItems(1, 2, 3, 4, 5).Transform(
+        // Double each number
+        flow.Map(func(ctx context.Context, n int) (int, error) {
+            return n * 2, nil
+        }),
+        // Keep only numbers greater than 5
+        flow.Filter(func(ctx context.Context, n int) bool {
+            return n > 5
+        }),
+        // Convert to string
+        flow.Map(func(ctx context.Context, n int) (string, error) {
+            return strconv.Itoa(n), nil
+        }),
+    )
+    
+    // Collect results into a slice
+    results, err := flow.Collect[string](ctx, f)
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+    
+    fmt.Println(results) // ["6", "8", "10"]
+}
 ```
 
-### Reduce Example
+### Working with Channels
 
 ```go
-// Sum all numbers in a pipeline
-sum := func(acc, item int) int { return acc + item }
+package main
 
-// The final values will be [1, 3, 6, 10, 15]
-pipeline.
-    FromSlice(1, 2, 3, 4, 5).
-    Thru(pipeline.Reduce(sum)).
-    To(pipeline.ToSlice())
+import (
+    "context"
+    "fmt"
+    "time"
+    
+    "github.com/nisimpson/flow"
+)
+
+func main() {
+    // Create a channel and send values to it
+    ch := make(chan int)
+    go func() {
+        defer close(ch)
+        for i := 1; i <= 5; i++ {
+            ch <- i
+            time.Sleep(100 * time.Millisecond)
+        }
+    }()
+    
+    // Create a flow from the channel
+    f := flow.NewFromChannel(ch)
+    
+    // Create a context with timeout
+    ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+    defer cancel()
+    
+    // Process the flow
+    for item := range f.Out(ctx) {
+        fmt.Printf("Received: %d\n", item)
+    }
+}
+```
+
+### Chunking and Windowing
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    
+    "github.com/nisimpson/flow"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // Create a flow with numbers 1 through 10
+    f := flow.NewFromRange(1, 11, 1)
+    
+    // Group into chunks of 3
+    chunks, err := flow.Collect[[]int](ctx, f.Transform(flow.Chunk[int](3)))
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+    fmt.Println("Chunks:", chunks) // [[1 2 3], [4 5 6], [7 8 9], [10]]
+    
+    // Create sliding windows of size 3, stepping by 1
+    windows, err := flow.Collect[[]int](ctx, flow.NewFromRange(1, 8, 1).Transform(
+        flow.SlidingWindow[int](func(opts *flow.SlidingWindowOptions) {
+            opts.WindowSize = 3
+            opts.StepSize = 1
+        }),
+    ))
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+    fmt.Println("Windows:", windows) // [[1 2 3], [2 3 4], [3 4 5], [4 5 6], [5 6 7]]
+}
+```
+
+### Error Handling
+
+```go
+package main
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    
+    "github.com/nisimpson/flow"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // Create a flow with a transformation that might fail
+    f := flow.NewFromItems(1, 2, 0, 4, 5).Transform(
+        flow.Map(func(ctx context.Context, n int) (int, error) {
+            if n == 0 {
+                return 0, errors.New("division by zero")
+            }
+            return 10 / n, nil
+        }),
+    )
+    
+    // Collect results and handle errors
+    results, err := flow.Collect[int](ctx, f)
+    if err != nil {
+        fmt.Printf("Error occurred: %v\n", err)
+    } else {
+        fmt.Println("Results:", results)
+    }
+}
+```
+
+### Fan-Out and Fan-In
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    
+    "github.com/nisimpson/flow"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // Create a flow with numbers
+    f := flow.NewFromItems(1, 2, 3, 4, 5, 6)
+    
+    // Create a fan-out sink to separate odd and even numbers
+    sink := &flow.FanOutSink[int]{
+        Key: func(ctx context.Context, n int) string {
+            if n%2 == 0 {
+                return "even"
+            }
+            return "odd"
+        },
+    }
+    
+    // Execute the flow with the fan-out sink
+    err := f.Execute(ctx, sink)
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+    
+    // Process each source separately
+    for _, src := range sink.Sources() {
+        items, _ := flow.Collect[int](ctx, src)
+        fmt.Println("Source items:", items)
+    }
+    
+    // Fan-in: Merge multiple flows
+    f1 := flow.NewFromItems(1, 3, 5)
+    f2 := flow.NewFromItems(2, 4, 6)
+    merged := flow.Merge(f1, f2)
+    
+    mergedItems, _ := flow.Collect[int](ctx, merged)
+    fmt.Println("Merged items:", mergedItems)
+}
+```
+
+### Rate Limiting
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+    
+    "github.com/nisimpson/flow"
+    "golang.org/x/time/rate"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // Create a flow with rate limiting (2 items per second)
+    f := flow.NewFromItems(1, 2, 3, 4, 5).Transform(
+        flow.Limit(rate.Limit(2), 1),
+    )
+    
+    start := time.Now()
+    
+    // Process the flow
+    for item := range f.Out(ctx) {
+        fmt.Printf("Processed %d after %v\n", item, time.Since(start))
+    }
+}
 ```
 
 ## Contributing
@@ -130,3 +315,5 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+

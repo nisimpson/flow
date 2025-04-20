@@ -1,4 +1,90 @@
-// Package flow provides primitives for building flow-based processing pipelines.
+/*
+Package flow provides primitives for building flow-based processing pipelines. It implements
+a pull-based streaming model that enables efficient data processing through composable
+components.
+
+# Core Concepts
+
+  - A [Stream] represents a sequence of values that can be iterated over using a pull-based
+    model. Consumers request values through a yield function, and the stream continues
+    producing values until either the source is exhausted or the consumer stops requesting
+    values.
+
+  - A [Source] is the fundamental building block for creating data pipelines. It provides
+    a single method Out that returns a Stream of values. Sources can be created from
+    various inputs including slices, channels, iterables, and time-based events.
+
+  - A [Flow] represents a factory function that creates a Source. Flows provide a way to
+    create reusable pipeline components that can be composed together. They support
+    operations like merging multiple sources and cloning streams.
+
+# Key Features
+
+  - Context-aware processing with cancellation support
+  - Built-in error handling and propagation
+  - Type-safe data processing
+  - Composable pipeline components
+  - Support for both synchronous and asynchronous processing
+
+# Common Source Constructors
+
+  - NewFromItems: Creates a Flow from a variadic list of items
+  - NewFromChannel: Creates a Flow from a channel
+  - NewFromIterable: Creates a Flow from an Iterable source
+  - NewFromTicker: Creates a Flow that emits timestamps at specified intervals
+  - NewFromRange: Creates a Flow that emits a sequence of integers
+  - Merge: Combines multiple sources into a single Flow
+
+# Example Usage
+
+Creating a simple stream:
+
+	stream := func(yield func(any) bool) {
+	    for i := 0; i < 5; i++ {
+	        if !yield(i) {
+	            return // Stop if consumer requests
+	        }
+	    }
+	}
+
+Creating and using a Flow:
+
+	// Create a Flow that emits numbers 1 through 5
+	flow := NewFromSourceFunc(func(ctx context.Context) Stream {
+	    return func(yield func(any) bool) {
+	        for i := 1; i <= 5; i++ {
+	            if ctx.Err() != nil {
+	                return
+	            }
+	            if !yield(i) {
+	                return
+	            }
+	        }
+	    }
+	})
+
+	// Use the flow
+	ctx := context.Background()
+	for item := range flow.Out(ctx) {
+	    fmt.Println(item)
+	}
+
+# Error Handling
+
+The package includes built-in error handling through context. Errors can be set using
+the SetError function and will be propagated through the pipeline:
+
+	if err != nil {
+	    SetError(ctx, err)
+	    continue
+	}
+
+# Thread Safety
+
+All Flow operations are designed to be thread-safe when used with proper context
+cancellation. Multiple goroutines can safely consume from the same Flow using
+Clone() to create independent copies of the stream.
+*/
 package flow
 
 import (
