@@ -160,8 +160,8 @@ type Source interface {
 	Stream(context.Context) Stream
 }
 
-// SourceFunc is a function type that implements the Source interface. It allows regular
-// functions to be used as Sources by implementing the Out method.
+// SourceFunc is a function type that implements the [Source] interface. It allows regular
+// functions to be used as Sources by implementing the [Source.Stream] method.
 type SourceFunc func(context.Context) Stream
 
 // Stream implements the [Source] interface for [SourceFunc].
