@@ -296,7 +296,7 @@ func main() {
 
     // Create a flow with rate limiting (2 items per second)
     f := flow.NewFromItems(1, 2, 3, 4, 5).Transform(
-        flow.Limit(rate.Limit(2), 1),
+        flow.Limit(rate.Every(time.Millisecond), 1),
     )
 
     start := time.Now()
@@ -304,6 +304,73 @@ func main() {
     // Process the flow
     for item := range f.Stream(ctx) {
         fmt.Printf("Processed %d after %v\n", item, time.Since(start))
+    }
+}
+```
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/nisimpson/flow"
+)
+
+// BatchDataIterator demonstrates fetching data in batches
+type BatchDataIterator struct {
+    currentBatch int
+    batchSize   int
+    maxBatches  int
+    closed      bool
+}
+
+func (bi *BatchDataIterator) HasNext(ctx context.Context) bool {
+    if bi.closed {
+        return false
+    }
+    return bi.currentBatch < bi.maxBatches
+}
+
+func (bi *BatchDataIterator) Next(ctx context.Context) (any, error) {
+    if bi.closed {
+        return nil, fmt.Errorf("iterator is closed")
+    }
+    if bi.currentBatch >= bi.maxBatches {
+        return nil, fmt.Errorf("no more batches")
+    }
+
+    // Simulate fetching a batch of data
+    time.Sleep(100 * time.Millisecond)
+    batch := fmt.Sprintf("Batch %d", bi.currentBatch)
+    bi.currentBatch++
+    return batch, nil
+}
+
+func (bi *BatchDataIterator) Close(ctx context.Context) {
+    bi.closed = true
+}
+
+func main() {
+    iterator := &BatchDataIterator{
+        batchSize:   10,
+        maxBatches:  5,
+    }
+
+    // Create a flow and process batches
+    f := flow.NewFromIterable(iterator).
+        Transform(
+            flow.Map(func(ctx context.Context, batch string) (string, error) {
+            return fmt.Sprintf("Processed %s", batch), nil
+            }),
+        )
+
+    // Process results
+    ctx := context.Background()
+    for item := range f.Stream(ctx) {
+        fmt.Println(item)
     }
 }
 ```

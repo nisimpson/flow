@@ -17,10 +17,10 @@ type Transform func(Source) Source
 // Join combines multiple transformers into a single [Transform] by composing them in indexed order.
 // Each transformers's output becomes the input to the next transformer in the sequence.
 //
-// Join panics if no transformers are provided.
+// Join returns [Passthrough] if no transformers are provided.
 func Join(pipes ...Transform) Transform {
 	if len(pipes) == 0 {
-		panic("no pipes to join")
+		return Passthrough()
 	}
 	return func(s Source) Source {
 		var cur Source

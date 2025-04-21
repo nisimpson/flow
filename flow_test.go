@@ -146,7 +146,7 @@ func TestFlowCloneIterable(t *testing.T) {
 	require.ElementsMatch(t, []any{}, got2)
 }
 
-func TestPipes(t *testing.T) {
+func TestTransforms(t *testing.T) {
 	type testcase struct {
 		name    string
 		in      flow.Flow
@@ -156,6 +156,12 @@ func TestPipes(t *testing.T) {
 	}
 
 	for _, tc := range []testcase{
+		{
+			name:    "empty",
+			in:      flow.NewFromSource(flow.Empty()),
+			want:    []any{},
+			wantErr: false,
+		},
 		{
 			name:    "passthrough",
 			in:      flow.NewFromItems(1, 2, 3),
@@ -311,23 +317,18 @@ func TestPipes(t *testing.T) {
 		{
 			name:    "empty fibonnaci",
 			in:      flow.NewFromIterable(NewFibonacciIterator(1)),
-			pipes:   []flow.Transform{flow.Passthrough()},
 			want:    []any{},
 			wantErr: false,
 		},
 		{
 			name:    "single fibonnaci",
 			in:      flow.NewFromIterable(NewFibonacciIterator(2)),
-			pipes:   []flow.Transform{flow.Passthrough()},
 			want:    []any{1, 1},
 			wantErr: false,
 		},
 		{
-			name: "many fibonnaci",
-			in:   flow.NewFromIterable(NewFibonacciIterator(10)),
-			pipes: []flow.Transform{
-				flow.Passthrough(),
-			},
+			name:    "many fibonnaci",
+			in:      flow.NewFromIterable(NewFibonacciIterator(10)),
 			want:    []any{1, 1, 2, 3, 5, 8},
 			wantErr: false,
 		},
