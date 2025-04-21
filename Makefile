@@ -52,7 +52,7 @@ no-dirty:
 # OPERATIONS
 # ==================================================================================== #
 
-.PHONE update
+.PHONY: update
 update:
 	@go get -u ./...
 
