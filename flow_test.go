@@ -165,7 +165,7 @@ func TestTransforms(t *testing.T) {
 		{
 			name:    "passthrough",
 			in:      flow.NewFromItems(1, 2, 3),
-			pipes:   []flow.Transform{flow.Passthrough()},
+			pipes:   []flow.Transform{flow.Pass()},
 			want:    []any{1, 2, 3},
 			wantErr: false,
 		},
@@ -207,7 +207,7 @@ func TestTransforms(t *testing.T) {
 		{
 			name:    "unique",
 			in:      flow.NewFromItems(1, 2, 2, 3),
-			pipes:   []flow.Transform{flow.Unique[int]()},
+			pipes:   []flow.Transform{flow.KeepDistinct[int]()},
 			want:    []any{1, 2, 3},
 			wantErr: false,
 		},
@@ -291,7 +291,7 @@ func TestTransforms(t *testing.T) {
 			name: "skip if number is even",
 			in:   flow.NewFromItems(1, 2, 3, 4),
 			pipes: []flow.Transform{
-				flow.SkipIf(func(_ context.Context, i int) bool { return i%2 == 0 }),
+				flow.OmitIf(func(_ context.Context, i int) bool { return i%2 == 0 }),
 			},
 			want:    []any{1, 3},
 			wantErr: false,
@@ -300,7 +300,7 @@ func TestTransforms(t *testing.T) {
 			name: "last",
 			in:   flow.NewFromItems(1, 2, 3, 4),
 			pipes: []flow.Transform{
-				flow.Last(),
+				flow.KeepLast(),
 			},
 			want:    []any{4},
 			wantErr: false,
@@ -309,7 +309,7 @@ func TestTransforms(t *testing.T) {
 			name: "first",
 			in:   flow.NewFromItems(1, 2, 3, 4),
 			pipes: []flow.Transform{
-				flow.First(),
+				flow.KeepFirst(),
 			},
 			want:    []any{1},
 			wantErr: false,

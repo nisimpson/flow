@@ -3,7 +3,6 @@ package flow
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sync"
 
 	"golang.org/x/time/rate"
@@ -14,13 +13,13 @@ import (
 // or transform the data [Stream].
 type Transform func(Source) Source
 
-// Join combines multiple transformers into a single [Transform] by composing them in indexed order.
+// Join combines multiple transformers into a single [Transform] by composing them in order.
 // Each transformers's output becomes the input to the next transformer in the sequence.
 //
-// Join returns [Passthrough] if no transformers are provided.
+// Join returns [Pass] if no transformers are provided.
 func Join(pipes ...Transform) Transform {
 	if len(pipes) == 0 {
-		return Passthrough()
+		return Pass()
 	}
 	return func(s Source) Source {
 		var cur Source
@@ -52,9 +51,9 @@ func (fn Flow) Transform(pipes ...Transform) Flow {
 	}
 }
 
-// Passthrough creates a new [Transform] component that forwards items without modification.
+// Pass creates a new [Transform] component that forwards items without modification.
 // This can be useful for debugging or when you need to maintain the [Flow] structure without processing.
-func Passthrough() Transform {
+func Pass() Transform {
 	return func(s Source) Source {
 		return s
 	}
@@ -275,21 +274,21 @@ func Keep(n int) Transform {
 	}
 }
 
-// First creates a new [Transform] that takes only the first item from the stream
+// KeepFirst creates a new [Transform] that takes only the first item from the stream
 // and terminates processing. It is semantically equivalent to [Keep](1).
 //
 // Example:
 //
 //	// Get first item from stream
 //	f := NewFromItems(1, 2, 3, 4, 5).
-//	    Transform(First())
+//	    Transform(KeepFirst())
 //
 //	result, err := Collect[int](ctx, f)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //	fmt.Println(result) // [1]
-func First() Transform {
+func KeepFirst() Transform {
 	return Keep(1)
 }
 
@@ -310,7 +309,7 @@ func First() Transform {
 //	fmt.Println(result) // [3, 4, 5]
 func Skip(n int) Transform {
 	if n <= 0 {
-		return Passthrough()
+		return Pass()
 	}
 	return func(s Source) Source {
 		return SourceFunc(func(ctx context.Context) Stream {
@@ -330,21 +329,21 @@ func Skip(n int) Transform {
 	}
 }
 
-// Last creates a new [Transform] that yields only the last item from the stream.
+// KeepLast creates a new [Transform] that yields only the last item from the stream.
 // If the stream is empty, no items are yielded.
 //
 // Example:
 //
 //	// Get the last item from a stream of numbers
 //	flow := NewFromItems(1, 2, 3, 4, 5).
-//	    Transform(Last())
+//	    Transform(KeepLast())
 //
 //	result, err := Collect[int](ctx, f)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //	fmt.Println(result) // [5]
-func Last() Transform {
+func KeepLast() Transform {
 	return func(s Source) Source {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
@@ -411,14 +410,14 @@ func KeepIf[T any](fn func(context.Context, T) bool) Transform {
 	return Filter(fn)
 }
 
-// SkipIf creates a new [Transform] that selectively excludes items from the [Stream]
+// OmitIf creates a new [Transform] that selectively excludes items from the [Stream]
 // based on the provided predicate function. It is the inverse of [KeepIf].
 //
 // Example:
 //
 //	// Skip negative numbers
 //	flow := NewFromItems(-2, -1, 0, 1, 2).
-//	    Transform(SkipIf(func(ctx context.Context, n int) bool {
+//	    Transform(OmitIf(func(ctx context.Context, n int) bool {
 //	        return n < 0
 //	    }))
 //
@@ -427,18 +426,18 @@ func KeepIf[T any](fn func(context.Context, T) bool) Transform {
 //	    log.Fatal(err)
 //	}
 //	fmt.Println(result) // [0, 1, 2]
-func SkipIf[T any](fn func(context.Context, T) bool) Transform {
+func OmitIf[T any](fn func(context.Context, T) bool) Transform {
 	return Filter(func(ctx context.Context, t T) bool { return !fn(ctx, t) })
 }
 
-type UniqueOptions[T any] struct {
+type KeepDistinctOptions[T any] struct {
 	// KeyFunction is a function that generates a string key for a given element.
 	// This key is used to determine uniqueness. If two elements generate the
 	// same key, they are considered duplicates.
 	KeyFunction func(T) string
 }
 
-// Unique creates a new [Transform] that filters out duplicate elements from the [Stream].
+// KeepDistinct creates a new [Transform] that filters out duplicate elements from the [Stream].
 // It accepts optional configuration functions to customize the [Flow]'s behavior.
 // By default, it uses the string representation of elements as the uniqueness key.
 //
@@ -446,31 +445,33 @@ type UniqueOptions[T any] struct {
 //
 //	// Remove duplicate numbers
 //	flow := NewFromItems(1, 2, 2, 3, 3, 4).
-//	    Transform(Unique[int]())
+//	    Transform(KeepDistinct[int]())
 //
 //	result, err := Collect[int](ctx, flow)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //	fmt.Println(result) // [1, 2, 3, 4]
-func Unique[T any](opts ...func(*UniqueOptions[T])) Transform {
-	options := UniqueOptions[T]{KeyFunction: func(t T) string { return fmt.Sprintf("%v", t) }}
+func KeepDistinct[T any](opts ...func(*KeepDistinctOptions[T])) Transform {
+	options := KeepDistinctOptions[T]{KeyFunction: func(t T) string { return fmt.Sprintf("%v", t) }}
 	for _, opt := range opts {
 		opt(&options)
 	}
 
 	return func(s Source) Source {
 		return SourceFunc(func(ctx context.Context) Stream {
-			cache := map[string]any{}
+			visited := map[string]struct{}{}
 			keyFn := options.KeyFunction
 			return func(yield func(any) bool) {
 				for item := range s.Stream(ctx) {
-					cache[keyFn(item.(T))] = item
-				}
-				for value := range maps.Values(cache) {
-					if !yield(value) {
+					key := keyFn(item.(T))
+					if _, ok := visited[key]; ok {
+						continue
+					}
+					if !yield(item) {
 						return
 					}
+					visited[key] = struct{}{}
 				}
 			}
 		})

@@ -25,7 +25,7 @@ Flow is a Go library that provides primitives for building flow-based processing
   - FlatMap/Flatten: Expand data streams
   - Chunk: Group items into fixed-size chunks
   - SlidingWindow: Create overlapping windows of data
-  - Unique: Remove duplicates
+  - SkipDuplicates: Remove duplicates
   - Limit: Apply rate limiting
   - Keep/Skip/First/Last: Control which items are processed
 - **Flexible data sinks**:
@@ -86,15 +86,21 @@ func main() {
 
     // Create a flow and apply transformations
     f := flow.NewFromItems(1, 2, 3, 4, 5).Transform(
-        // Double each number
+        // Double each number -> [2, 4, 6, 8, 10]
         flow.Map(func(ctx context.Context, n int) (int, error) {
             return n * 2, nil
         }),
-        // Keep only numbers greater than 5
-        flow.Filter(func(ctx context.Context, n int) bool {
+        // Keep only numbers greater than 5 -> [6, 8, 10]
+        flow.KeepIf(func(ctx context.Context, n int) bool {
             return n > 5
         }),
-        // Convert to string
+        // Reduce to a rolling sum of each value -> [6, 14, 24]
+        flow.Reduce(func(ctx context.Context, acc, item int) (int, error) {
+            return acc + item, nil
+        }),
+        // Keep the last value -> [24]
+        flow.KeepLast(),
+        // Convert to string -> ["24"]
         flow.Map(func(ctx context.Context, n int) (string, error) {
             return strconv.Itoa(n), nil
         }),
@@ -107,7 +113,7 @@ func main() {
         return
     }
 
-    fmt.Println(results) // ["6", "8", "10"]
+    fmt.Println(results) // ["24"]
 }
 ```
 
