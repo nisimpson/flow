@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sync"
 
 	"golang.org/x/time/rate"
 )
@@ -65,7 +66,7 @@ func Map[T any, U any](fn func(context.Context, T) (U, error)) Transform {
 	return func(s Source) Source {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					mapped, err := fn(ctx, item.(T))
 					if err != nil {
 						SetError(ctx, err)
@@ -80,13 +81,90 @@ func Map[T any, U any](fn func(context.Context, T) (U, error)) Transform {
 	}
 }
 
+// ParallelMap creates a new [Transform] that transforms items in parallel using multiple workers.
+// Each input item is transformed from type T to type U using function fn, with processing
+// distributed across n concurrent workers.
+//
+// Example:
+//
+//	// Process numbers in parallel
+//	flow := NewFromItems(1, 2, 3, 4, 5).
+//	    Transform(ParallelMap[int, int](3, func(ctx context.Context, n int) (int, error) {
+//	        time.Sleep(time.Second) // Simulate work
+//	        return n * 2, nil
+//	    }))
+//
+//	result, err := Collect[int](ctx, flow)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	fmt.Println(result) // [2, 4, 6, 8, 10] <- order is not guaranteed
+func ParallelMap[T any, U any](n int, fn func(context.Context, T) (U, error)) Transform {
+	if n <= 0 {
+		panic(fmt.Sprintf("invalid number of workers: %d", n))
+	}
+
+	return func(s Source) Source {
+		return SourceFunc(func(ctx context.Context) Stream {
+			return func(yield func(any) bool) {
+				var (
+					in   = make(chan any, n)   // worker pool input
+					out  = make(chan U)        // mapped results output
+					done = make(chan struct{}) // yield complete flag
+					wg   = &sync.WaitGroup{}   // goroutine synchronizer
+				)
+
+				// start consumer
+				go func() {
+					defer close(done)
+					for item := range out {
+						if !yield(item) { // can only be called from single goroutine
+							return
+						}
+					}
+				}()
+
+				// start workers
+				for i := 0; i < n; i++ {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						for item := range in {
+							mapped, err := fn(ctx, item.(T))
+							if err != nil {
+								SetError(ctx, err)
+								return
+							}
+							select {
+							case out <- mapped:
+							case <-ctx.Done():
+								return
+							}
+						}
+					}()
+				}
+
+				// process items
+				for item := range s.Stream(ctx) {
+					in <- item // blocks when all workers are busy
+				}
+
+				close(in)  // close out input
+				wg.Wait()  // wait for workers to finish
+				close(out) // close out output
+				<-done     // wait for consumer to finish
+			}
+		})
+	}
+}
+
 // FlatMap creates a new [Transform] component that transforms items using the provided mapping function.
 // Each input item is transformed into a slice of output items, which are then sent individually downstream.
 func FlatMap[T any, U any](fn func(context.Context, T) ([]U, error)) Transform {
 	return func(s Source) Source {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					items, err := fn(ctx, item.(T))
 					if err != nil {
 						SetError(ctx, err)
@@ -144,7 +222,7 @@ func Reduce[T any](fn func(ctx context.Context, acc T, item T) (T, error)) Trans
 					acc any
 					err error
 				)
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					if acc == nil {
 						acc = item
 					} else {
@@ -186,7 +264,7 @@ func Keep(n int) Transform {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
 				cur := 0
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					if cur >= n || !yield(item) {
 						return
 					}
@@ -238,7 +316,7 @@ func Skip(n int) Transform {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
 				cur := 0
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					if cur < n {
 						cur++
 						continue
@@ -271,7 +349,7 @@ func Last() Transform {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
 				var last any
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					last = item
 				}
 				if last != nil {
@@ -303,7 +381,7 @@ func Filter[T any](fn func(context.Context, T) bool) Transform {
 	return func(s Source) Source {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					if fn(ctx, item.(T)) && !yield(item.(T)) {
 						return
 					}
@@ -386,7 +464,7 @@ func Unique[T any](opts ...func(*UniqueOptions[T])) Transform {
 			cache := map[string]any{}
 			keyFn := options.KeyFunction
 			return func(yield func(any) bool) {
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					cache[keyFn(item.(T))] = item
 				}
 				for value := range maps.Values(cache) {
@@ -419,7 +497,7 @@ func Chunk[T any](n int) Transform {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
 				buffer := make([]T, 0, n)
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					buffer = append(buffer, item.(T))
 					if len(buffer) == n && !yield(buffer) {
 						return
@@ -477,7 +555,7 @@ func SlidingWindow[T any](opts ...func(*SlidingWindowOptions)) Transform {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
 				buffer := make([]T, 0, options.WindowSize)
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					buffer = append(buffer, item.(T))
 					if len(buffer) == options.WindowSize {
 						window := make([]T, options.WindowSize)
@@ -521,7 +599,7 @@ func Limit(limit rate.Limit, burst int) Transform {
 	return func(s Source) Source {
 		return SourceFunc(func(ctx context.Context) Stream {
 			return func(yield func(any) bool) {
-				for item := range s.Out(ctx) {
+				for item := range s.Stream(ctx) {
 					if err := limiter.Wait(ctx); err != nil {
 						SetError(ctx, err)
 						return

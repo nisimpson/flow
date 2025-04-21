@@ -7,9 +7,9 @@ import (
 // Sinker represents a destination for a [Flow]'s output. It provides a way to consume
 // and process values from a [Stream].
 type Sinker interface {
-	// In processes items from the provided [Stream] within the given context.
+	// Collect processes items from the provided [Stream] within the given context.
 	// The implementation should respect context cancellation.
-	In(ctx context.Context, stream Stream)
+	Collect(ctx context.Context, stream Stream)
 }
 
 // Collect executes the [Flow] by sending its output to the provided [Sinker]. It handles error
@@ -24,10 +24,10 @@ func (fn Flow) Collect(ctx context.Context, sink Sinker) error {
 		src     = fn()
 		fe      = FlowError{}
 		flowctx = setFlowErrorContext(ctx, &fe)
-		stream  = src.Out(flowctx)
+		stream  = src.Stream(flowctx)
 	)
 
-	sink.In(flowctx, stream)
+	sink.Collect(flowctx, stream)
 	if fe.hasErrors {
 		return &fe
 	}
@@ -38,8 +38,8 @@ func (fn Flow) Collect(ctx context.Context, sink Sinker) error {
 // simple functions to be used as Sinkers.
 type SinkerFunc func(context.Context, Stream)
 
-// In implements the [Sinker] interface for [SinkerFunc].
-func (fn SinkerFunc) In(ctx context.Context, in Stream) { fn(ctx, in) }
+// Collect implements the [Sinker] interface for [SinkerFunc].
+func (fn SinkerFunc) Collect(ctx context.Context, in Stream) { fn(ctx, in) }
 
 // SliceSink collects items from a [Stream] into a slice. It provides a type-safe way
 // to accumulate items of type T into a slice while respecting context cancellation.
@@ -63,9 +63,9 @@ func Collect[T any](ctx context.Context, src Source) ([]T, error) {
 // Items returns the underlying slice containing collected items.
 func (s SliceSink[T]) Items() []T { return s.arr }
 
-// In implements the [Sinker] interface. It collects items from the stream into
+// Collect implements the [Sinker] interface. It collects items from the stream into
 // the underlying slice, respecting context cancellation.
-func (s *SliceSink[T]) In(ctx context.Context, in Stream) {
+func (s *SliceSink[T]) Collect(ctx context.Context, in Stream) {
 	for item := range in {
 		select {
 		case <-ctx.Done():
@@ -104,10 +104,10 @@ type ChannelSink[T any] chan<- T
 // NewChannelSink creates a new [ChannelSink] from the provided channel.
 func NewChannelSink[T any](ch chan<- T) ChannelSink[T] { return ChannelSink[T](ch) }
 
-// In implements the [Sinker] interface, sending items from the [Stream] to the
+// Collect implements the [Sinker] interface, sending items from the [Stream] to the
 // underlying channel until there are no more items present or the provided
 // context is cancelled.
-func (c ChannelSink[T]) In(ctx context.Context, in Stream) {
+func (c ChannelSink[T]) Collect(ctx context.Context, in Stream) {
 	defer close(c)
 	for item := range in {
 		select {
@@ -130,15 +130,31 @@ type FanOutSink[T any] struct {
 	Key func(context.Context, T) string
 
 	// sources contains the resulting Sources after partitioning, one for each unique key.
-	sources []Source
+	sources map[string]Source
 }
 
 // Sources returns the list of [Source] partitions created during processing.
-func (f FanOutSink[T]) Sources() []Source { return f.sources }
+func (f FanOutSink[T]) Sources() []Source {
+	items := make([]Source, 0, len(f.sources))
+	for _, v := range f.sources {
+		items = append(items, v)
+	}
+	return items
+}
+
+// Source returns the [Source] associated with the given key after partitioning.
+// If no Source exists for the key, an empty stream source is returned.
+func (f FanOutSink[T]) Source(key string) Source {
+	src, ok := f.sources[key]
+	if !ok {
+		return Empty()
+	}
+	return src
+}
 
 // In implements the [Sinker] interface. It partitions incoming items based on the key function
 // and creates a separate [Source] for each partition.
-func (f *FanOutSink[T]) In(ctx context.Context, in Stream) {
+func (f *FanOutSink[T]) Collect(ctx context.Context, in Stream) {
 	maps := map[string][]T{}
 	for item := range in {
 		if ctx.Err() != nil {
@@ -149,10 +165,8 @@ func (f *FanOutSink[T]) In(ctx context.Context, in Stream) {
 		maps[key] = append(maps[key], value)
 	}
 
-	sources := make([]Source, 0, len(maps))
-	for _, v := range maps {
-		sources = append(sources, NewFromItems(v...))
+	f.sources = map[string]Source{}
+	for k, v := range maps {
+		f.sources[k] = NewFromItems(v...)
 	}
-
-	f.sources = sources
 }

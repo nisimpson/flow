@@ -188,6 +188,16 @@ func TestPipes(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "double in parallel, keep if greater than equal to 8",
+			in:   flow.NewFromItems(1, 2, 3, 4),
+			pipes: []flow.Transform{
+				flow.ParallelMap(2, double),
+				flow.KeepIf(func(_ context.Context, i int) bool { return i >= 8 }),
+			},
+			want:    []any{8},
+			wantErr: false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var (

@@ -65,7 +65,7 @@ Creating and using a Flow:
 
 	// Use the flow
 	ctx := context.Background()
-	for item := range flow.Out(ctx) {
+	for item := range flow.Stream(ctx) {
 	    fmt.Println(item)
 	}
 
@@ -119,21 +119,53 @@ import (
 //	    break // Stop if condition is met
 //	  }
 //	}
-type Stream = iter.Seq[any]
+type Stream iter.Seq[any]
+
+// Stream implements [Source], returning itself while ignoring context.
+func (s Stream) Stream(ctx context.Context) Stream { return s }
+
+// Empty creates a [Stream] that produces no values. This can be useful as a default or placeholder
+// source in situations where a no-op source is needed.
+//
+// Example:
+//
+//	// Use Empty as a fallback flow
+//	var flow Source
+//	if someCondition {
+//	    flow = NewFromItems(1, 2, 3)
+//	} else {
+//	    flow = Empty()
+//	}
+//
+//	// The empty flow will produce no values
+//	ctx := context.Background()
+//	for item := range flow.Stream(ctx) {
+//	    // This loop will not execute for Empty flow
+//	}
+func Empty() Stream {
+	return func(func(any) bool) {
+		// No-op
+	}
+}
 
 // Source defines an interface for producing streams of values. A Source is the fundamental
 // building block for creating data pipelines. It provides a single method Out that returns
 // a [Stream] of values.
 type Source interface {
-	Out(context.Context) Stream
+	// Stream returns a [Stream] that produces values from this [Source]. The returned Stream
+	// should continue producing values until either:
+	//   - The source is exhausted
+	//   - The provided context is cancelled
+	//   - The consumer stops requesting values
+	Stream(context.Context) Stream
 }
 
 // SourceFunc is a function type that implements the Source interface. It allows regular
 // functions to be used as Sources by implementing the Out method.
 type SourceFunc func(context.Context) Stream
 
-// Out implements the [Source] interface for [SourceFunc].
-func (fn SourceFunc) Out(ctx context.Context) Stream { return fn(ctx) }
+// Stream implements the [Source] interface for [SourceFunc].
+func (fn SourceFunc) Stream(ctx context.Context) Stream { return fn(ctx) }
 
 // Flow represents a factory function that creates a [Source]. It provides a way to
 // create reusable pipeline components that can be composed together.
@@ -163,7 +195,7 @@ type Flow func() Source
 //
 //	// Use the flow in a pipeline
 //	ctx := context.Background()
-//	for item := range flow.Out(ctx) {
+//	for item := range flow.Stream(ctx) {
 //	    fmt.Println(item)
 //	}
 func NewFromSource(s Source) Flow {
@@ -196,7 +228,7 @@ func NewFromSource(s Source) Flow {
 //
 //	// Use the flow
 //	ctx := context.Background()
-//	for item := range flow.Out(ctx) {
+//	for item := range flow.Stream(ctx) {
 //	    fmt.Println(item)
 //	}
 func NewFromSourceFunc(fn func(context.Context) Stream) Flow {
@@ -290,7 +322,7 @@ func NewFromIterable(it Iterable) Flow {
 //
 //	// Use the flow
 //	ctx := context.Background()
-//	for item := range flow.Out(ctx) {
+//	for item := range flow.Stream(ctx) {
 //	    fmt.Println(item)
 //	}
 func NewFromItems[T any](items ...T) Flow {
@@ -330,7 +362,7 @@ func NewFromItems[T any](items ...T) Flow {
 //
 //	// Process values from the flow
 //	ctx := context.Background()
-//	for item := range flow.Out(ctx) {
+//	for item := range flow.Stream(ctx) {
 //	    fmt.Println(item)
 //	}
 func NewFromChannel[T any](ch <-chan T) Flow {
@@ -410,7 +442,7 @@ func Merge(sources ...Source) Flow {
 	return NewFromSourceFunc(func(ctx context.Context) Stream {
 		return func(yield func(any) bool) {
 			for _, src := range sources {
-				for item := range src.Out(ctx) {
+				for item := range src.Stream(ctx) {
 					if !yield(item) {
 						return
 					}
@@ -420,9 +452,9 @@ func Merge(sources ...Source) Flow {
 	})
 }
 
-// Out returns a [Stream] from the [Flow] using the provided context.
-func (fn Flow) Out(ctx context.Context) Stream {
-	return fn().Out(ctx)
+// Stream returns a [Stream] from the [Flow] using the provided context.
+func (fn Flow) Stream(ctx context.Context) Stream {
+	return fn().Stream(ctx)
 }
 
 // Clone creates a new [Flow] that produces the same values as the original.

@@ -50,19 +50,19 @@ package main
 import (
     "context"
     "fmt"
-    
+
     "github.com/nisimpson/flow"
 )
 
 func main() {
     // Create a flow from a slice of integers
     f := flow.NewFromItems(1, 2, 3, 4, 5)
-    
+
     // Create a context
     ctx := context.Background()
-    
+
     // Consume the flow and print each item
-    for item := range f.Out(ctx) {
+    for item := range f.Stream(ctx) {
         fmt.Println(item)
     }
 }
@@ -77,13 +77,13 @@ import (
     "context"
     "fmt"
     "strconv"
-    
+
     "github.com/nisimpson/flow"
 )
 
 func main() {
     ctx := context.Background()
-    
+
     // Create a flow and apply transformations
     f := flow.NewFromItems(1, 2, 3, 4, 5).Transform(
         // Double each number
@@ -99,14 +99,14 @@ func main() {
             return strconv.Itoa(n), nil
         }),
     )
-    
+
     // Collect results into a slice
     results, err := flow.Collect[string](ctx, f)
     if err != nil {
         fmt.Printf("Error: %v\n", err)
         return
     }
-    
+
     fmt.Println(results) // ["6", "8", "10"]
 }
 ```
@@ -120,7 +120,7 @@ import (
     "context"
     "fmt"
     "time"
-    
+
     "github.com/nisimpson/flow"
 )
 
@@ -134,16 +134,16 @@ func main() {
             time.Sleep(100 * time.Millisecond)
         }
     }()
-    
+
     // Create a flow from the channel
     f := flow.NewFromChannel(ch)
-    
+
     // Create a context with timeout
     ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
     defer cancel()
-    
+
     // Process the flow
-    for item := range f.Out(ctx) {
+    for item := range f.Stream(ctx) {
         fmt.Printf("Received: %d\n", item)
     }
 }
@@ -157,16 +157,16 @@ package main
 import (
     "context"
     "fmt"
-    
+
     "github.com/nisimpson/flow"
 )
 
 func main() {
     ctx := context.Background()
-    
+
     // Create a flow with numbers 1 through 10
     f := flow.NewFromRange(1, 11, 1)
-    
+
     // Group into chunks of 3
     chunks, err := flow.Collect[[]int](ctx, f.Transform(flow.Chunk[int](3)))
     if err != nil {
@@ -174,7 +174,7 @@ func main() {
         return
     }
     fmt.Println("Chunks:", chunks) // [[1 2 3], [4 5 6], [7 8 9], [10]]
-    
+
     // Create sliding windows of size 3, stepping by 1
     windows, err := flow.Collect[[]int](ctx, flow.NewFromRange(1, 8, 1).Transform(
         flow.SlidingWindow[int](func(opts *flow.SlidingWindowOptions) {
@@ -199,13 +199,13 @@ import (
     "context"
     "errors"
     "fmt"
-    
+
     "github.com/nisimpson/flow"
 )
 
 func main() {
     ctx := context.Background()
-    
+
     // Create a flow with a transformation that might fail
     f := flow.NewFromItems(1, 2, 0, 4, 5).Transform(
         flow.Map(func(ctx context.Context, n int) (int, error) {
@@ -215,7 +215,7 @@ func main() {
             return 10 / n, nil
         }),
     )
-    
+
     // Collect results and handle errors
     results, err := flow.Collect[int](ctx, f)
     if err != nil {
@@ -234,16 +234,16 @@ package main
 import (
     "context"
     "fmt"
-    
+
     "github.com/nisimpson/flow"
 )
 
 func main() {
     ctx := context.Background()
-    
+
     // Create a flow with numbers
     f := flow.NewFromItems(1, 2, 3, 4, 5, 6)
-    
+
     // Create a fan-out sink to separate odd and even numbers
     sink := &flow.FanOutSink[int]{
         Key: func(ctx context.Context, n int) string {
@@ -253,25 +253,25 @@ func main() {
             return "odd"
         },
     }
-    
+
     // Execute the flow with the fan-out sink
-    err := f.Execute(ctx, sink)
+    err := f.Collect(ctx, sink)
     if err != nil {
         fmt.Printf("Error: %v\n", err)
         return
     }
-    
+
     // Process each source separately
     for _, src := range sink.Sources() {
         items, _ := flow.Collect[int](ctx, src)
         fmt.Println("Source items:", items)
     }
-    
+
     // Fan-in: Merge multiple flows
     f1 := flow.NewFromItems(1, 3, 5)
     f2 := flow.NewFromItems(2, 4, 6)
     merged := flow.Merge(f1, f2)
-    
+
     mergedItems, _ := flow.Collect[int](ctx, merged)
     fmt.Println("Merged items:", mergedItems)
 }
@@ -286,23 +286,23 @@ import (
     "context"
     "fmt"
     "time"
-    
+
     "github.com/nisimpson/flow"
     "golang.org/x/time/rate"
 )
 
 func main() {
     ctx := context.Background()
-    
+
     // Create a flow with rate limiting (2 items per second)
     f := flow.NewFromItems(1, 2, 3, 4, 5).Transform(
         flow.Limit(rate.Limit(2), 1),
     )
-    
+
     start := time.Now()
-    
+
     // Process the flow
-    for item := range f.Out(ctx) {
+    for item := range f.Stream(ctx) {
         fmt.Printf("Processed %d after %v\n", item, time.Since(start))
     }
 }
@@ -315,5 +315,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-
