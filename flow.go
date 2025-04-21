@@ -237,81 +237,6 @@ func NewFromSourceFunc(fn func(context.Context) Stream) Flow {
 	}
 }
 
-// Iterable represents a sequence of values that can be traversed. It provides methods
-// for checking if more values exist, retrieving the next value, and cleaning up resources.
-//
-// Example:
-//
-//	type DBIterator struct {
-//		rows    *sql.Rows
-//		closed  bool
-//	}
-//
-//	func NewDBIterator(db *sql.DB, query string) (*DBIterator, error) {
-//		rows, err := db.Query(query)
-//		if err != nil {
-//				return nil, err
-//		}
-//		return &DBIterator{rows: rows}, nil
-//	}
-//
-//	func (dbi *DBIterator) HasNext(ctx context.Context) bool {
-//		if dbi.closed {
-//				return false
-//		}
-//		return dbi.rows.Next()
-//	}
-//
-//	func (dbi *DBIterator) Next(ctx context.Context) (any, error) {
-//		var data any
-//		err := dbi.rows.Scan(&data)
-//		return data, err
-//	}
-//
-//	func (dbi *DBIterator) Close(ctx context.Context) {
-//		if !dbi.closed {
-//				dbi.rows.Close()
-//				dbi.closed = true
-//		}
-//	}
-type Iterable interface {
-	// HasNext checks if there are more items available in the sequence.
-	// The context parameter allows for cancellation of the check operation.
-	HasNext(context.Context) bool
-
-	// Next retrieves the next item in the sequence.
-	// Returns the next item and any error that occurred during retrieval.
-	// The context parameter allows for cancellation of the retrieval operation.
-	Next(context.Context) (any, error)
-
-	// Close performs cleanup of any resources used by the Iterable.
-	// The context parameter allows for cancellation of the cleanup operation.
-	Close(context.Context)
-}
-
-// NewFromIterable creates a [Flow] from an [Iterable] source. It handles the conversion
-// of the iteration-based interface to a stream-based flow.
-func NewFromIterable(it Iterable) Flow {
-	return NewFromSourceFunc(func(ctx context.Context) Stream {
-		return func(yield func(any) bool) {
-			defer it.Close(ctx)
-			for it.HasNext(ctx) {
-				if ctx.Err() != nil {
-					return
-				}
-				item, err := it.Next(ctx)
-				if err != nil {
-					SetError(ctx, err)
-					continue
-				}
-				if !yield(item) {
-					return
-				}
-			}
-		}
-	})
-}
-
 // NewFromItems creates a [Flow] from a variadic list of items. It provides a convenient way
 // to create a flow from a known set of values of any type T.
 //
@@ -452,7 +377,8 @@ func Merge(sources ...Source) Flow {
 	})
 }
 
-// Stream returns a [Stream] from the [Flow] using the provided context.
+// Stream implements [Source], returning the generated [Stream] from the [Flow] using
+// the provided context.
 func (fn Flow) Stream(ctx context.Context) Stream {
 	return fn().Stream(ctx)
 }

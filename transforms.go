@@ -566,15 +566,6 @@ func SlidingWindow[T any](opts ...func(*SlidingWindowOptions)) Transform {
 						buffer = buffer[options.StepSize:]
 					}
 				}
-				// emit remaining windows
-				for len(buffer) >= options.WindowSize {
-					window := make([]T, options.WindowSize)
-					copy(window, buffer)
-					if !yield(window) {
-						return
-					}
-					buffer = buffer[options.StepSize:]
-				}
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package flow_test
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -21,6 +22,57 @@ var (
 	halves    = func(_ context.Context, i int) ([]int, error) { return []int{i / 2, i / 2}, nil }
 	keepOdds  = func(_ context.Context, i int) bool { return i%2 != 0 }
 )
+
+// FibonacciIterator implements Iterable to generate a sequence of Fibonacci numbers.
+type FibonacciIterator struct {
+	prev    int
+	current int
+	max     int
+	closed  bool
+}
+
+// NewFibonacciIterator creates a new FibonacciIterator that generates Fibonacci numbers
+// up to but not including max.
+func NewFibonacciIterator(max int) *FibonacciIterator {
+	return &FibonacciIterator{
+		prev:    0,
+		current: 1,
+		max:     max,
+		closed:  false,
+	}
+}
+
+// HasNext implements Iterable.HasNext by checking if there are more Fibonacci numbers
+// to generate within the max limit.
+func (fi *FibonacciIterator) HasNext(ctx context.Context) bool {
+	if fi.closed {
+		return false
+	}
+	return fi.current < fi.max
+}
+
+// Next implements Iterable.Next by returning the next Fibonacci number in the sequence.
+func (fi *FibonacciIterator) Next(ctx context.Context) (any, error) {
+	if fi.closed {
+		return nil, fmt.Errorf("iterator is closed")
+	}
+
+	if fi.current >= fi.max {
+		return nil, fmt.Errorf("no more Fibonacci numbers")
+	}
+
+	next := fi.prev + fi.current
+	value := fi.current
+	fi.prev = fi.current
+	fi.current = next
+
+	return value, nil
+}
+
+// Close implements Iterable.Close by marking the iterator as closed.
+func (fi *FibonacciIterator) Close(ctx context.Context) {
+	fi.closed = true
+}
 
 func TestFromClock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -62,18 +114,36 @@ func TestMerge(t *testing.T) {
 func TestFlowClone(t *testing.T) {
 	src1 := flow.NewFromItems(1, 2, 3)
 	src2 := src1.Clone()
-	src1 = src1.Transform(flow.Map(double))
-	src2 = src2.Transform(flow.Map(triple))
 
+	src1 = src1.Transform(flow.Map(double))
 	ctx := context.TODO()
 	got1, err1 := flow.Collect[any](ctx, src1)
-	got2, err2 := flow.Collect[any](ctx, src2)
-
 	require.NoError(t, err1)
 	require.ElementsMatch(t, []any{2, 4, 6}, got1)
 
+	src2 = src2.Transform(flow.Map(triple))
+	got2, err2 := flow.Collect[any](ctx, src2)
 	require.NoError(t, err2)
 	require.ElementsMatch(t, []any{3, 6, 9}, got2)
+}
+
+func TestFlowCloneIterable(t *testing.T) {
+	it := NewFibonacciIterator(10)
+	src1 := flow.NewFromIterable(it)
+
+	ctx := context.TODO()
+	got1, err1 := flow.Collect[any](ctx, src1)
+	require.NoError(t, err1)
+	require.ElementsMatch(t, []any{1, 1, 2, 3, 5, 8}, got1)
+	require.True(t, it.closed, true)
+
+	// since the iterable is shared by both flows,
+	// the second flow will not generate any values; the first
+	// flow will have exhausted the iterable up to the max value.
+	src2 := src1.Clone()
+	got2, err2 := flow.Collect[any](ctx, src2)
+	require.NoError(t, err2)
+	require.ElementsMatch(t, []any{}, got2)
 }
 
 func TestPipes(t *testing.T) {
@@ -189,6 +259,19 @@ func TestPipes(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "sliding window (emit remaining window)",
+			in:   flow.NewFromItems(1, 2, 3),
+			pipes: []flow.Transform{flow.SlidingWindow[int](func(swo *flow.SlidingWindowOptions) {
+				swo.WindowSize = 2
+				swo.StepSize = 1
+			})},
+			want: []any{
+				[]int{1, 2},
+				[]int{2, 3},
+			},
+			wantErr: false,
+		},
+		{
 			name: "double in parallel, keep if greater than equal to 8",
 			in:   flow.NewFromItems(1, 2, 3, 4),
 			pipes: []flow.Transform{
@@ -196,6 +279,56 @@ func TestPipes(t *testing.T) {
 				flow.KeepIf(func(_ context.Context, i int) bool { return i >= 8 }),
 			},
 			want:    []any{8},
+			wantErr: false,
+		},
+		{
+			name: "skip if number is even",
+			in:   flow.NewFromItems(1, 2, 3, 4),
+			pipes: []flow.Transform{
+				flow.SkipIf(func(_ context.Context, i int) bool { return i%2 == 0 }),
+			},
+			want:    []any{1, 3},
+			wantErr: false,
+		},
+		{
+			name: "last",
+			in:   flow.NewFromItems(1, 2, 3, 4),
+			pipes: []flow.Transform{
+				flow.Last(),
+			},
+			want:    []any{4},
+			wantErr: false,
+		},
+		{
+			name: "first",
+			in:   flow.NewFromItems(1, 2, 3, 4),
+			pipes: []flow.Transform{
+				flow.First(),
+			},
+			want:    []any{1},
+			wantErr: false,
+		},
+		{
+			name:    "empty fibonnaci",
+			in:      flow.NewFromIterable(NewFibonacciIterator(1)),
+			pipes:   []flow.Transform{flow.Passthrough()},
+			want:    []any{},
+			wantErr: false,
+		},
+		{
+			name:    "single fibonnaci",
+			in:      flow.NewFromIterable(NewFibonacciIterator(2)),
+			pipes:   []flow.Transform{flow.Passthrough()},
+			want:    []any{1, 1},
+			wantErr: false,
+		},
+		{
+			name: "many fibonnaci",
+			in:   flow.NewFromIterable(NewFibonacciIterator(10)),
+			pipes: []flow.Transform{
+				flow.Passthrough(),
+			},
+			want:    []any{1, 1, 2, 3, 5, 8},
 			wantErr: false,
 		},
 	} {
