@@ -334,7 +334,7 @@ func NewFromTicker(interval time.Duration) Flow {
 	})
 }
 
-// NewFromRange creates a Flow that emits a sequence of integers from start (inclusive)
+// NewFromRange creates a [Flow] that emits a sequence of integers from start (inclusive)
 // to end (exclusive), incrementing by the specified step value.
 //
 // The function will stop emitting values when either:

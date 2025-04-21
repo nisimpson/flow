@@ -13,7 +13,7 @@ type Sinker interface {
 }
 
 // Collect executes the [Flow] by sending its output to the provided [Sinker]. It handles error
-// propagation and context cancellation while processing the stream.
+// propagation and context cancellation while processing the [Stream].
 //
 // The method will stop processing when either:
 //   - The flow completes successfully
@@ -97,7 +97,7 @@ func Discard() Sinker {
 	})
 }
 
-// ChannelSink sends items from a [Stream] to a typed channel. It provides type-safe
+// ChannelSink is a [Sinker] sends items from a [Stream] to a typed channel. It provides type-safe
 // forwarding of items while respecting context cancellation.
 type ChannelSink[T any] chan<- T
 
@@ -118,7 +118,7 @@ func (c ChannelSink[T]) Collect(ctx context.Context, in Stream) {
 	}
 }
 
-// FanOutSink distributes items from a [Stream] into multiple flows based on a key function.
+// FanOutSink is a [Sinker] that distributes items from a [Stream] into multiple flows based on a key function.
 // It allows for dynamic partitioning of data streams based on item characteristics.
 type FanOutSink[T any] struct {
 	// Flows maps keys to flow transformation functions. Each key represents a partition
