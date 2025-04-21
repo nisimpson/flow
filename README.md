@@ -20,14 +20,14 @@ Flow is a Go library that provides primitives for building flow-based processing
   - Clone streams for parallel processing
 - **Comprehensive transformation operations**:
   - Map: Transform data items
-  - Filter/KeepIf/SkipIf: Include/exclude data based on predicates
+  - Filter/KeepIf/OmitIf: Include/exclude data based on predicates
   - Reduce: Aggregate data
   - FlatMap/Flatten: Expand data streams
   - Chunk: Group items into fixed-size chunks
   - SlidingWindow: Create overlapping windows of data
-  - SkipDuplicates: Remove duplicates
+  - KeepDistinct: Remove duplicates
   - Limit: Apply rate limiting
-  - Keep/Skip/First/Last: Control which items are processed
+  - Keep/Omit/KeepFirst/KeepLast: Control which items are processed
 - **Flexible data sinks**:
   - Collect results into slices
   - Send data to channels
