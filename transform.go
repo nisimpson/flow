@@ -460,18 +460,18 @@ func KeepDistinct[T any](opts ...func(*KeepDistinctOptions[T])) Transform {
 
 	return func(s Source) Source {
 		return SourceFunc(func(ctx context.Context) Stream {
-			visited := map[string]struct{}{}
+			seen := map[string]struct{}{}
 			keyFn := options.KeyFunction
 			return func(yield func(any) bool) {
 				for item := range s.Stream(ctx) {
 					key := keyFn(item.(T))
-					if _, ok := visited[key]; ok {
+					if _, ok := seen[key]; ok {
 						continue
 					}
 					if !yield(item) {
 						return
 					}
-					visited[key] = struct{}{}
+					seen[key] = struct{}{}
 				}
 			}
 		})
